@@ -36,8 +36,12 @@ app.param('config', (req, _res, next, configParam) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Manifest
+//  Manifest & Root Routes
 // ─────────────────────────────────────────────────────────────
+
+app.get('/', (_req, res) => {
+    res.redirect('https://rashikfarhan.github.io/RGoon/');
+});
 
 app.get('/manifest.json',         (_req, res) => res.json(manifest));
 app.get('/:config/manifest.json', (_req, res) => res.json(manifest));
