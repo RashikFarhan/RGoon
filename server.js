@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { manifest } from './manifest.js';
+import { manifest, installedManifest } from './manifest.js';
 import addon from './addon.js';
 
 dotenv.config();
@@ -63,13 +63,15 @@ app.get('/', (_req, res) => {
 // ─────────────────────────────────────────────────────────────
 
 app.get('/manifest.json', (_req, res) => {
+    // No config present → show Configure button so the user goes to the portal first
     res.setHeader('Content-Type', 'application/json');
     res.json(manifest);
 });
 
 app.get('/:config/manifest.json', (req, res) => {
+    // Config IS present in the URL → user is already configured → show green Install button
     res.setHeader('Content-Type', 'application/json');
-    res.json(manifest);
+    res.json(installedManifest);
 });
 
 // ─────────────────────────────────────────────────────────────
