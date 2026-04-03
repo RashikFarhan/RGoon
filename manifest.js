@@ -11,7 +11,7 @@ export const manifest = {
             id: "stash_scenes",
             name: "Stash Scenes",
             extra: [
-                { name: "genre", isRequired: false },
+                { name: "genre",     isRequired: false },
                 { name: "developer", isRequired: false }
             ]
         }
@@ -19,6 +19,6 @@ export const manifest = {
     behaviorHints: {
         configurable: true,
         configurationRequired: true,
-        configurationUrl: "http://localhost:7000/configure" // Placeholder configuration URL
+        configurationUrl: "https://rashikfarhan.github.io/RGoon/"
     }
 };

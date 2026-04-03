@@ -9,14 +9,25 @@ const app   = express();
 const PORT  = process.env.PORT || 7000;
 
 // Obtain the SDK's canonical interface object
-// .get(resource, type, id, extra, config) dispatches to the correct handler
 const addonInterface = addon.getInterface();
 
 // ─────────────────────────────────────────────────────────────
+//  CORS — Stremio REQUIRES Access-Control-Allow-Origin: *
+//  on every single response. Without this header, Stremio
+//  silently drops the response and shows "Could not fetch data."
+// ─────────────────────────────────────────────────────────────
+
+app.use((_req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin',  '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    next();
+});
+
+// ─────────────────────────────────────────────────────────────
 //  Dynamic Config Decoder Middleware
-//  Decodes the base64 :config path segment and attaches
-//  { stashUrl, stashApiKey } to req.stashContext for every
-//  dynamic route that carries a :config param.
+//  Decodes the base64 :config segment and attaches the full
+//  config object to req.stashContext for every dynamic route.
 // ─────────────────────────────────────────────────────────────
 
 app.param('config', (req, _res, next, configParam) => {
@@ -25,39 +36,53 @@ app.param('config', (req, _res, next, configParam) => {
         const parsed    = JSON.parse(configStr);
 
         req.stashContext = {
-            stashUrl:    parsed.stashUrl,
-            stashApiKey: parsed.stashApiKey,
+            stashUrl:    parsed.stashUrl    ?? null,
+            stashApiKey: parsed.stashApiKey ?? null,
+            noLGBT:      parsed.noLGBT      ?? false,
         };
+
+        console.log(`[Stashio] Config decoded | url=${req.stashContext.stashUrl} | noLGBT=${req.stashContext.noLGBT}`);
     } catch {
         console.warn('[Stashio] Could not decode :config param — proceeding without credentials.');
-        req.stashContext = {};
+        req.stashContext = { stashUrl: null, stashApiKey: null, noLGBT: false };
     }
     next();
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Manifest & Root Routes
+//  Root Route → redirect to Config Portal
 // ─────────────────────────────────────────────────────────────
 
 app.get('/', (_req, res) => {
     res.redirect('https://rashikfarhan.github.io/RGoon/');
 });
 
-app.get('/manifest.json',         (_req, res) => res.json(manifest));
-app.get('/:config/manifest.json', (_req, res) => res.json(manifest));
+// ─────────────────────────────────────────────────────────────
+//  Manifest
+//  Both /manifest.json (no config) and /:config/manifest.json
+// ─────────────────────────────────────────────────────────────
+
+app.get('/manifest.json', (_req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(manifest);
+});
+
+app.get('/:config/manifest.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json(manifest);
+});
 
 // ─────────────────────────────────────────────────────────────
 //  Catalog  GET /:config/catalog/:type/:id.json
-//  Query-string extras: ?genre=Studio+Name&developer=Tag+Name
 // ─────────────────────────────────────────────────────────────
 
 app.get('/:config/catalog/:type/:id.json', async (req, res) => {
     const { type, id } = req.params;
-    const extra        = req.query;              // Stremio passes filters as QS
+    const extra        = req.query;
 
     try {
-        // Pass stashContext as the SDK `config` argument
         const result = await addonInterface.get('catalog', type, id, extra, req.stashContext);
+        res.setHeader('Content-Type', 'application/json');
         res.json(result);
     } catch (err) {
         console.error(`[Stashio] /catalog error: ${err.message}`);
@@ -74,6 +99,7 @@ app.get('/:config/meta/:type/:id.json', async (req, res) => {
 
     try {
         const result = await addonInterface.get('meta', type, id, {}, req.stashContext);
+        res.setHeader('Content-Type', 'application/json');
         res.json(result);
     } catch (err) {
         console.error(`[Stashio] /meta error: ${err.message}`);
@@ -82,7 +108,7 @@ app.get('/:config/meta/:type/:id.json', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Stream  GET /:config/stream/:type/:id.json  (Chunk 3)
+//  Stream  GET /:config/stream/:type/:id.json
 // ─────────────────────────────────────────────────────────────
 
 app.get('/:config/stream/:type/:id.json', async (req, res) => {
@@ -90,6 +116,7 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
 
     try {
         const result = await addonInterface.get('stream', type, id, {}, req.stashContext);
+        res.setHeader('Content-Type', 'application/json');
         res.json(result);
     } catch (err) {
         console.error(`[Stashio] /stream error: ${err.message}`);
@@ -104,3 +131,5 @@ app.get('/:config/stream/:type/:id.json', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Stashio Addon is live at http://localhost:${PORT}`);
 });
+
+export default app;
