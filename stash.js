@@ -111,51 +111,117 @@ export const GET_SCENES = /* GraphQL */ `
 `;
 
 // ─────────────────────────────────────────────────────────────
-//  Query: Full-text Scene Search (Search bar)
-//  StashDB's `text` field matches against title, performer names,
-//  studio names, and tags in a single pass.
+//  Hybrid Scene Search
+//
+//  Problem: StashDB's `text` field is a phrase matcher.
+//  "Angela White" → 701 results  ✓
+//  "Brazzers Angela White" → 0 results  ✗
+//
+//  Solution: Tokenize the query, fan out to multiple parallel
+//  searches (text, title, performer name, studio name), merge
+//  all unique results, then rank them by how many tokens from
+//  the original query appear in each scene's metadata.
+//  This gives a real relevance-ranked hybrid search.
 // ─────────────────────────────────────────────────────────────
 
-export const SEARCH_SCENES = /* GraphQL */ `
-    query SearchScenes($input: SceneQueryInput!) {
-        queryScenes(input: $input) {
-            count
-            scenes {
-                id
-                title
-                date
-                duration
-                images { url }
-                studio { id name }
-                performers {
-                    performer { id name }
-                }
-                tags { id name }
-            }
-        }
-    }
+const SCENE_FIELDS = /* GraphQL */ `
+    id title date duration
+    images { url }
+    studio { id name }
+    performers { performer { id name } }
+    tags { id name }
 `;
 
+/** Run a single queryScenes call with arbitrary input */
+async function runQuery(config, input) {
+    const gql = `
+        query($input: SceneQueryInput!) {
+            queryScenes(input: $input) {
+                scenes { ${SCENE_FIELDS} }
+            }
+        }`;
+    const data = await queryStash(config, gql, { input });
+    return data?.queryScenes?.scenes ?? [];
+}
+
 /**
- * Performs a free-text search across scenes.
+ * Score a scene against a set of lower-cased query tokens.
+ * Each token that appears in any metadata field adds 1 point.
+ * A hit in title/performer is worth more than a generic text match.
+ */
+function scoreScene(scene, tokens) {
+    const fields = [
+        scene.title ?? '',
+        scene.studio?.name ?? '',
+        ...(scene.performers ?? []).map(p => p.performer?.name ?? ''),
+        ...(scene.tags ?? []).map(t => t.name ?? ''),
+    ].map(f => f.toLowerCase());
+
+    const haystack = fields.join(' ');
+    return tokens.reduce((score, tok) => score + (haystack.includes(tok) ? 1 : 0), 0);
+}
+
+/**
+ * Smart hybrid search.
+ *
+ * Strategy:
+ *  1. Run `text` query against the full raw query (catches simple cases).
+ *  2. Split query into tokens; run `text` for each token individually.
+ *  3. Merge results, deduplicate by ID, rank by token match score.
+ *
  * @param {{ stashUrl: string, stashApiKey: string }} config
- * @param {string} query  - the user's search string
+ * @param {string} rawQuery  - the user's exact search string
  * @param {number} page
  * @param {number} perPage
  */
-export async function searchScenes(config, query, page = 1, perPage = 20) {
-    const variables = {
-        input: {
-            text:      query,
-            page,
-            per_page:  perPage,
-            sort:      'DATE',
-            direction: 'DESC',
-        },
-    };
-    const data = await queryStash(config, SEARCH_SCENES, variables);
-    return data?.queryScenes?.scenes ?? [];
+export async function searchScenes(config, rawQuery, page = 1, perPage = 20) {
+    const trimmed = rawQuery.trim();
+    if (!trimmed) return [];
+
+    const tokens = trimmed.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+
+    // Base input defaults
+    const baseInput = { page, per_page: perPage, sort: 'DATE', direction: 'DESC' };
+
+    // Build all query variants to run in parallel
+    const queryVariants = [
+        // 1. The full phrase as-is (works for single-field queries like "Angela White")
+        runQuery(config, { ...baseInput, text: trimmed }),
+    ];
+
+    // 2. For hybrid queries with 2+ tokens: try each token separately so
+    //    StashDB can match across different fields (performer, studio, title, tags)
+    if (tokens.length >= 2) {
+        for (const tok of tokens) {
+            queryVariants.push(runQuery(config, { ...baseInput, text: tok }));
+        }
+    }
+
+    // 3. Run all variants in parallel
+    const allArrays = await Promise.all(queryVariants);
+
+    // 4. Merge and deduplicate by ID
+    const seen   = new Map(); // id → { scene, score }
+    for (const scenes of allArrays) {
+        for (const scene of scenes) {
+            if (!seen.has(scene.id)) {
+                seen.set(scene.id, { scene, score: scoreScene(scene, tokens) });
+            }
+        }
+    }
+
+    // 5. Sort by relevance (most matched tokens first), then by date
+    const ranked = [...seen.values()]
+        .sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return (b.scene.date ?? '').localeCompare(a.scene.date ?? '');
+        })
+        .slice(0, perPage)
+        .map(r => r.scene);
+
+    return ranked;
 }
+
 
 
 

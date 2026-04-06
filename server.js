@@ -93,7 +93,7 @@ const catalogHandler = async (req, res) => {
     if (extra) {
         extra.split('&').forEach(kv => {
             const [k, v] = kv.split('=');
-            if (k && v) extraObj[k] = decodeURIComponent(v);
+            if (k && v) extraObj[k] = decodeURIComponent(v.replace(/\+/g, ' '));
         });
     }
 

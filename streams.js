@@ -20,8 +20,9 @@ const TGX_MIRRORS      = [
 // 504=XXX/Other, 505=XXX/Clips, 506=XXX/HD_Movies, 507=XXX/SD
 const ADULT_CATEGORIES = '500,501,502,504,505,506,507';
 
-const PROVIDER_TIMEOUT = 8_000;   // per-provider request timeout
-const TOTAL_TIMEOUT_MS = 14_500;  // hard deadline (keep under Vercel 15s limit)
+const TPB_TIMEOUT      = 6_000;   // TPB is a clean JSON API — should respond fast
+const TGX_MIRROR_TIMEOUT = 4_000; // per-mirror timeout for TGX; mirrors can be slow/down
+const TOTAL_TIMEOUT_MS = 14_000;  // hard deadline (keep under Vercel 15s limit)
 
 // ─────────────────────────────────────────────────────────────
 //  Metadata Normalisation
@@ -135,7 +136,7 @@ export function generateSearchQueries({ studio, parentStudio, title, date, code,
 async function searchTPB(query) {
     const url = `${TPB_SEARCH_URL}?q=${encodeURIComponent(query)}&cat=${ADULT_CATEGORIES}`;
     try {
-        const { data } = await axios.get(url, { timeout: PROVIDER_TIMEOUT });
+        const { data } = await axios.get(url, { timeout: TPB_TIMEOUT });
         if (!Array.isArray(data)) return [];
 
         return data
@@ -172,28 +173,29 @@ async function fetchTPBFiles(torrentId) {
 // ─────────────────────────────────────────────────────────────
 
 async function searchTGX(query) {
-    // cat=48 is TGX's XXX category; sort by seeders desc
+    // cat=48 is TGX's XXX/adult category; sort by seeders descending
     const headers = {
         'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
     };
 
     let html = null;
+    // Try each mirror with a short timeout; bail as soon as one responds
     for (const mirror of TGX_MIRRORS) {
         try {
             const url = `${mirror}?search=${encodeURIComponent(query)}&cat=48&sort=seeders&order=desc`;
-            const res = await axios.get(url, { timeout: PROVIDER_TIMEOUT, headers });
-            if (res.status === 200 && res.data?.length > 100) {
+            const res = await axios.get(url, { timeout: TGX_MIRROR_TIMEOUT, headers });
+            if (res.status === 200 && typeof res.data === 'string' && res.data.length > 500) {
                 html = res.data;
-                break;  // got a good response from this mirror
+                break;
             }
         } catch {
-            // try next mirror
+            // Mirror unreachable — try next one silently
         }
     }
 
     if (!html) {
-        console.warn(`[Stashio|TGX] All mirrors failed for "${query}"`);
+        // All mirrors down — return empty silently (won't block TPB results)
         return [];
     }
 
