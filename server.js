@@ -78,19 +78,37 @@ app.get('/:config/manifest.json', (req, res) => {
 //  Catalog  GET /:config/catalog/:type/:id.json
 // ─────────────────────────────────────────────────────────────
 
-app.get('/:config/catalog/:type/:id.json', async (req, res) => {
-    const { type, id } = req.params;
-    const extra        = req.query;
+const catalogHandler = async (req, res) => {
+    let { type, id, extra } = req.params;
+
+    // Remove the .json extension if it's there
+    if (extra && extra.endsWith('.json')) {
+        extra = extra.replace('.json', '');
+    } else if (id.endsWith('.json')) {
+        id = id.replace('.json', '');
+    }
+
+    // Parse the extra string into an object (e.g., "search=brazzers" -> { search: "brazzers" })
+    const extraObj = {};
+    if (extra) {
+        extra.split('&').forEach(kv => {
+            const [k, v] = kv.split('=');
+            if (k && v) extraObj[k] = decodeURIComponent(v);
+        });
+    }
 
     try {
-        const result = await addonInterface.get('catalog', type, id, extra, req.stashContext);
+        const result = await addonInterface.get('catalog', type, id, extraObj, req.stashContext);
         res.setHeader('Content-Type', 'application/json');
         res.json(result);
     } catch (err) {
         console.error(`[Stashio] /catalog error: ${err.message}`);
         res.json({ metas: [] });
     }
-});
+};
+
+app.get('/:config/catalog/:type/:id.json', catalogHandler);
+app.get('/:config/catalog/:type/:id/:extra', catalogHandler);
 
 // ─────────────────────────────────────────────────────────────
 //  Meta  GET /:config/meta/:type/:id.json
