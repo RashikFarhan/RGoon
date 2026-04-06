@@ -10,7 +10,7 @@ const PORTAL_URL = 'https://rashikfarhan.github.io/RGoon/';
 
 const core = {
     id:          'com.stashio.bridge',
-    version:     '1.0.0',
+    version:     '1.0.1',
     name:        'Stashio',
     description: 'Bridge between StashDB and public torrent providers',
     resources:   ['catalog', 'meta', 'stream'],
