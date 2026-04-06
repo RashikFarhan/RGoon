@@ -176,6 +176,7 @@ export const GET_SCENE_DETAILS = /* GraphQL */ `
             studio {
                 id
                 name
+                parent { id name }
                 images { url }
             }
             performers {

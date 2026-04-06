@@ -246,34 +246,33 @@ addon.defineStreamHandler(async ({ type, id, config }) => {
         return { streams: [] };
     }
 
-    const studioRaw = scene.studio?.name ?? '';
-    const title     = scene.title        ?? '';
-    const date      = scene.date         ?? '';
-    const code      = scene.code         ?? '';
+    const studioRaw    = scene.studio?.name        ?? '';
+    const parentStudio = scene.studio?.parent?.name ?? '';
+    const title        = scene.title               ?? '';
+    const date         = scene.date                ?? '';
+    const code         = scene.code                ?? '';
+    const performers   = (scene.performers ?? []).map(p => p.as || p.performer?.name || '').filter(Boolean);
 
+    // OSHash / MD5 fingerprint for direct torrent hash lookup
     let hashQuery = null;
-    if (scene.fingerprints && Array.isArray(scene.fingerprints)) {
-        // Find OSHASH or MD5 as fallback torrent search
-        const fp = scene.fingerprints.find(f => f.algorithm === 'OSHash' || f.algorithm === 'MD5' || f.algorithm === 'OSHASH' || f.algorithm === 'md5');
-        if (fp) {
-            hashQuery = fp.hash;
-        }
+    if (Array.isArray(scene.fingerprints)) {
+        const fp = scene.fingerprints.find(f =>
+            f.algorithm === 'OSHash' || f.algorithm === 'MD5' ||
+            f.algorithm === 'OSHASH' || f.algorithm === 'md5'
+        );
+        if (fp) hashQuery = fp.hash;
     }
 
     console.log(
-        `[Stashio|Streams] Metadata | Studio: "${studioRaw}" | Title: "${title}" | Date: ${date} | Code: ${code} | Hash: ${hashQuery}`
+        `[Stashio|Streams] Studio: "${studioRaw}" | Parent: "${parentStudio}" | Title: "${title}" | Date: ${date} | Code: ${code} | Hash: ${hashQuery}`
     );
 
-    // Generate multi-variant search query strings
-    const queries = generateSearchQueries({ studio: studioRaw, title, date, code });
-    if (hashQuery) {
-        queries.unshift(hashQuery); // Try hash search first!
-    }
+    const queries = generateSearchQueries({ studio: studioRaw, parentStudio, title, date, code, performers });
+    if (hashQuery) queries.unshift(hashQuery); // hash search always wins
 
     console.log(`[Stashio|Streams] Query variants: ${JSON.stringify(queries)}`);
 
-    // Hunt, filter, and map to Stremio stream objects (15s hard deadline inside resolveStreams)
-    const streams = await resolveStreams(queries, null);
+    const streams = await resolveStreams(queries);
     console.log(`[Stashio|Streams] Found ${streams.length} streams`);
 
     return { streams };
