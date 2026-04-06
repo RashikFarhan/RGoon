@@ -4,18 +4,18 @@ import {
     queryStash,
     resolveStudioId,
     resolveTagId,
+    searchScenes,
     GET_SCENES,
     GET_SCENE_DETAILS,
     buildCatalogInput,
 } from './stash.js';
 import {
-    normaliseStudio,
     generateSearchQueries,
     resolveStreams,
 } from './streams.js';
 
 // ─────────────────────────────────────────────────────────────
-//  Content Filter: Tag Blacklist (Task 2)
+//  Content Filter: Tag Blacklist
 //  Applied when config.noLGBT === true.
 // ─────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ function toYear(dateStr) {
 function performerList(performers = []) {
     return performers
         .map(p => {
-            const name = p?.performer?.name;
+            const name  = p?.performer?.name;
             const alias = p?.as;
             return alias ? `${alias} (${name})` : name;
         })
@@ -70,11 +70,25 @@ function performerList(performers = []) {
         .join(', ');
 }
 
+/** Map a raw StashDB scene object → Stremio MetaPreview */
+function sceneToMeta(scene) {
+    return {
+        id:          `stash:${scene.id}`,
+        type:        'movie',
+        name:        scene.title ?? 'Untitled Scene',
+        poster:      firstImage(scene.images),
+        description: [
+            scene.studio?.name ? `Studio: ${scene.studio.name}` : null,
+            scene.date         ? `Date: ${scene.date}`          : null,
+        ].filter(Boolean).join(' · '),
+    };
+}
+
 // ─────────────────────────────────────────────────────────────
-//  Task 2: Catalog Handler
-//  SDK calls handler({ type, id, extra, config })
-//  extra.genre      → repurposed as Studio name filter
-//  extra.developer  → repurposed as Tag name filter
+//  Catalog Handler
+//  Handles two modes:
+//    1. Search mode  — extra.search is present (Stremio search bar)
+//    2. Browse mode  — normal catalog with optional genre/developer filters
 // ─────────────────────────────────────────────────────────────
 
 addon.defineCatalogHandler(async ({ type, id, extra, config }) => {
@@ -82,14 +96,43 @@ addon.defineCatalogHandler(async ({ type, id, extra, config }) => {
         return { metas: [] };
     }
 
-    const studioName = extra?.genre     ?? null;
-    const tagName    = extra?.developer ?? null;
-    const skip       = parseInt(extra?.skip ?? 0, 10);
-    const perPage    = 20;
-    const page       = Math.floor(skip / perPage) + 1;
+    const searchQuery = extra?.search    ?? null;
+    const studioName  = extra?.genre     ?? null;
+    const tagName     = extra?.developer ?? null;
+    const skip        = parseInt(extra?.skip ?? 0, 10);
+    const perPage     = 20;
+    const page        = Math.floor(skip / perPage) + 1;
 
+    const filterEnabled = config?.noLGBT === true;
+
+    // ── MODE 1: Search bar ─────────────────────────────────────
+    if (searchQuery) {
+        console.log(
+            `[Stashio] SEARCH | query="${searchQuery}" | page=${page} | from ${config?.stashUrl ?? 'unknown'}`
+        );
+
+        try {
+            let scenes = await searchScenes(config, searchQuery, page, perPage);
+
+            if (filterEnabled) {
+                const before = scenes.length;
+                scenes = scenes.filter(scene => !isBlacklisted(scene));
+                if (scenes.length < before) {
+                    console.log(`[Stashio] Content filter removed ${before - scenes.length} search result(s).`);
+                }
+            }
+
+            console.log(`[Stashio] SEARCH returned ${scenes.length} scene(s) for "${searchQuery}"`);
+            return { metas: scenes.map(sceneToMeta) };
+        } catch (err) {
+            console.error(`[Stashio] Search failed: ${err.message}`);
+            return { metas: [] };
+        }
+    }
+
+    // ── MODE 2: Browse with optional Studio / Tag filter ──────
     console.log(
-        `[Stashio] Fetching Catalog | Studio: "${studioName ?? 'all'}" | ` +
+        `[Stashio] BROWSE | Studio: "${studioName ?? 'all'}" | ` +
         `Tag: "${tagName ?? 'all'}" | Page: ${page} | from ${config?.stashUrl ?? 'unknown'}`
     );
 
@@ -104,8 +147,6 @@ addon.defineCatalogHandler(async ({ type, id, extra, config }) => {
         const data      = await queryStash(config, GET_SCENES, variables);
         let   scenes    = data?.queryScenes?.scenes ?? [];
 
-        // ── Task 2: Content Filter ──
-        const filterEnabled = config?.noLGBT === true;
         if (filterEnabled) {
             const before = scenes.length;
             scenes = scenes.filter(scene => !isBlacklisted(scene));
@@ -114,26 +155,16 @@ addon.defineCatalogHandler(async ({ type, id, extra, config }) => {
             }
         }
 
-        const metas = scenes.map(scene => ({
-            id:          `stash:${scene.id}`,
-            type:        'movie',
-            name:        scene.title ?? 'Untitled Scene',
-            poster:      firstImage(scene.images),
-            description: [
-                scene.studio?.name ? `Studio: ${scene.studio.name}` : null,
-                scene.date         ? `Date: ${scene.date}`          : null,
-            ].filter(Boolean).join(' · '),
-        }));
-
-        return { metas };
+        console.log(`[Stashio] BROWSE returned ${scenes.length} scene(s).`);
+        return { metas: scenes.map(sceneToMeta) };
     } catch (err) {
         console.error(`[Stashio] Catalog fetch failed: ${err.message}`);
-        return { metas: [] }; // Task 4: graceful degradation — never crash
+        return { metas: [] };
     }
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Task 3: Meta Handler
+//  Meta Handler
 // ─────────────────────────────────────────────────────────────
 
 addon.defineMetaHandler(async ({ type, id, config }) => {
@@ -144,7 +175,7 @@ addon.defineMetaHandler(async ({ type, id, config }) => {
     const stashId = id.replace(/^stash:/, '');
 
     console.log(
-        `[Stashio] Fetching Meta | Scene ID: ${stashId} | from ${config?.stashUrl ?? 'unknown'}`
+        `[Stashio] META | Scene ID: ${stashId} | from ${config?.stashUrl ?? 'unknown'}`
     );
 
     try {
@@ -156,39 +187,28 @@ addon.defineMetaHandler(async ({ type, id, config }) => {
         const performers = performerList(scene.performers);
         const poster     = firstImage(scene.images);
 
-        const meta = {
-            id:          `stash:${scene.id}`,
-            type:        'movie',
-            name:        scene.title ?? 'Untitled Scene',
-
-            // Full-resolution scene image as background
-            background:  poster,
-
-            // Studio logo as logo (optional — may be null)
-            logo:        firstImage(scene.studio?.images),
-
-            // Rich description: scene synopsis + performer credits
-            description: [
-                scene.details || null,
-                performers ? `Performers: ${performers}` : null,
-            ].filter(Boolean).join('\n\n'),
-
-            releaseInfo: toYear(scene.date),
-            runtime:     toMinutes(scene.duration),
-            poster,
-
-            // Tag names surfaced as genres in the Stremio UI
-            genres: (scene.tags ?? []).map(t => t.name).filter(Boolean),
-
-            // Official URLs (e.g. scene page on the studio's site)
-            links: (scene.urls ?? []).map(u => ({
-                name: u.type ?? 'Source',
-                category: 'Source',
-                url: u.url,
-            })),
+        return {
+            meta: {
+                id:          `stash:${scene.id}`,
+                type:        'movie',
+                name:        scene.title ?? 'Untitled Scene',
+                background:  poster,
+                logo:        firstImage(scene.studio?.images),
+                description: [
+                    scene.details || null,
+                    performers ? `Performers: ${performers}` : null,
+                ].filter(Boolean).join('\n\n'),
+                releaseInfo: toYear(scene.date),
+                runtime:     toMinutes(scene.duration),
+                poster,
+                genres: (scene.tags ?? []).map(t => t.name).filter(Boolean),
+                links:  (scene.urls ?? []).map(u => ({
+                    name:     u.type ?? 'Source',
+                    category: 'Source',
+                    url:      u.url,
+                })),
+            },
         };
-
-        return { meta };
     } catch (err) {
         console.error(`[Stashio] Meta fetch failed for ${stashId}: ${err.message}`);
         return { meta: null };
@@ -196,7 +216,7 @@ addon.defineMetaHandler(async ({ type, id, config }) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-//  Task 1–5: Stream Handler
+//  Stream Handler
 //  Flow: StashDB metadata → search queries → TPB hunt → filter → map
 // ─────────────────────────────────────────────────────────────
 
@@ -208,11 +228,10 @@ addon.defineStreamHandler(async ({ type, id, config }) => {
     const stashId = id.replace(/^stash:/, '');
 
     console.log(
-        `[Stashio|Streams] Stream request | Scene ID: ${stashId} | ` +
-        `from ${config?.stashUrl ?? 'unknown'}`
+        `[Stashio|Streams] STREAM request | Scene ID: ${stashId} | from ${config?.stashUrl ?? 'unknown'}`
     );
 
-    // ── Task 1: Fetch minimal scene metadata for query construction ──
+    // Fetch full scene metadata for query construction
     let scene = null;
     try {
         const data = await queryStash(config, GET_SCENE_DETAILS, { id: stashId });
@@ -230,23 +249,32 @@ addon.defineStreamHandler(async ({ type, id, config }) => {
     const studioRaw = scene.studio?.name ?? '';
     const title     = scene.title        ?? '';
     const date      = scene.date         ?? '';
+    const code      = scene.code         ?? '';
+
+    let hashQuery = null;
+    if (scene.fingerprints && Array.isArray(scene.fingerprints)) {
+        // Find OSHASH or MD5 as fallback torrent search
+        const fp = scene.fingerprints.find(f => f.algorithm === 'OSHash' || f.algorithm === 'MD5' || f.algorithm === 'OSHASH' || f.algorithm === 'md5');
+        if (fp) {
+            hashQuery = fp.hash;
+        }
+    }
 
     console.log(
-        `[Stashio|Streams] Scene metadata | Studio: "${studioRaw}" | ` +
-        `Title: "${title}" | Date: ${date}`
+        `[Stashio|Streams] Metadata | Studio: "${studioRaw}" | Title: "${title}" | Date: ${date} | Code: ${code} | Hash: ${hashQuery}`
     );
 
-    // ── Task 2: Generate search query variants ──
-    const queries = generateSearchQueries({
-        studio: studioRaw,
-        title,
-        date,
-    });
+    // Generate multi-variant search query strings
+    const queries = generateSearchQueries({ studio: studioRaw, title, date, code });
+    if (hashQuery) {
+        queries.unshift(hashQuery); // Try hash search first!
+    }
 
     console.log(`[Stashio|Streams] Query variants: ${JSON.stringify(queries)}`);
 
-    // ── Tasks 3–5: Hunt, filter, map — with 10s hard timeout ──
+    // Hunt, filter, and map to Stremio stream objects (15s hard deadline inside resolveStreams)
     const streams = await resolveStreams(queries, null);
+    console.log(`[Stashio|Streams] Found ${streams.length} streams`);
 
     return { streams };
 });

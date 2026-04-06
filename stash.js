@@ -111,6 +111,55 @@ export const GET_SCENES = /* GraphQL */ `
 `;
 
 // ─────────────────────────────────────────────────────────────
+//  Query: Full-text Scene Search (Search bar)
+//  StashDB's `text` field matches against title, performer names,
+//  studio names, and tags in a single pass.
+// ─────────────────────────────────────────────────────────────
+
+export const SEARCH_SCENES = /* GraphQL */ `
+    query SearchScenes($input: SceneQueryInput!) {
+        queryScenes(input: $input) {
+            count
+            scenes {
+                id
+                title
+                date
+                duration
+                images { url }
+                studio { id name }
+                performers {
+                    performer { id name }
+                }
+                tags { id name }
+            }
+        }
+    }
+`;
+
+/**
+ * Performs a free-text search across scenes.
+ * @param {{ stashUrl: string, stashApiKey: string }} config
+ * @param {string} query  - the user's search string
+ * @param {number} page
+ * @param {number} perPage
+ */
+export async function searchScenes(config, query, page = 1, perPage = 20) {
+    const variables = {
+        input: {
+            text:      query,
+            page,
+            per_page:  perPage,
+            sort:      'DATE',
+            direction: 'DESC',
+        },
+    };
+    const data = await queryStash(config, SEARCH_SCENES, variables);
+    return data?.queryScenes?.scenes ?? [];
+}
+
+
+
+// ─────────────────────────────────────────────────────────────
 //  Query: Single Scene Full Detail (Meta)
 // ─────────────────────────────────────────────────────────────
 
@@ -119,6 +168,7 @@ export const GET_SCENE_DETAILS = /* GraphQL */ `
         findScene(id: $id) {
             id
             title
+            code
             date
             details
             duration
@@ -134,6 +184,10 @@ export const GET_SCENE_DETAILS = /* GraphQL */ `
             }
             tags { id name }
             urls { url type }
+            fingerprints {
+                algorithm
+                hash
+            }
         }
     }
 `;

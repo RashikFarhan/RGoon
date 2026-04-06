@@ -2,11 +2,8 @@
  * manifest.js
  *
  * Exports two manifest variants:
- *   - baseManifest:        configurable=true  → shown when no :config present (new user)
- *   - installedManifest:   configurable=false → shown when :config IS present (configured user)
- *
- * Stremio shows "Configure" button on configurable=true manifests,
- * and the green "Install" button on configurable=false manifests.
+ *   - manifest:         configurable=true  → shown when no :config present (new user)
+ *   - installedManifest: configurable=false → shown when :config IS present (configured user)
  */
 
 const PORTAL_URL = 'https://rashikfarhan.github.io/RGoon/';
@@ -24,6 +21,9 @@ const core = {
             id:    'stash_scenes',
             name:  'Stash Scenes',
             extra: [
+                // ── search: enables the Stremio search bar for this addon ──
+                { name: 'search',    isRequired: false },
+                // ── genre / developer: repurposed Studio & Tag filters ──
                 { name: 'genre',     isRequired: false },
                 { name: 'developer', isRequired: false },
             ],
@@ -31,7 +31,7 @@ const core = {
     ],
 };
 
-// ── New user: no config in URL → show Configure button
+// New user: no config in URL → show Configure button
 export const manifest = {
     ...core,
     behaviorHints: {
@@ -41,7 +41,7 @@ export const manifest = {
     },
 };
 
-// ── Returning user: config already in URL → show Install button
+// Returning user: config already in URL → show Install button
 export const installedManifest = {
     ...core,
     behaviorHints: {
