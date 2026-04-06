@@ -28,6 +28,17 @@ export function normaliseStudio(name = '') {
 }
 
 /**
+ * Strips colons, hyphens, and other punctuation from titles 
+ * to maximize matches on TPB's strict search engine.
+ */
+export function normaliseTitle(title = '') {
+    return title
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
  * Returns the date in the uploader-friendly format most used on TPB:
  *   YYYY-MM-DD  (already the StashDB format — kept as-is)
  *   Also produces a DD.MM.YYYY variant used by some uploaders.
@@ -52,6 +63,7 @@ export function formatDate(isoDate = '') {
  */
 export function generateSearchQueries({ studio, title, date, code }) {
     const studioClean = normaliseStudio(studio);
+    const titleClean  = normaliseTitle(title);
     const { iso, dot } = formatDate(date);
     const queries = [];
 
@@ -59,7 +71,7 @@ export function generateSearchQueries({ studio, title, date, code }) {
     if (studioClean && iso)  queries.push(`${studioClean} ${iso}`);
 
     // Secondary: Studio + Scene Title  (fallback if date doesn't match)
-    if (studioClean && title) queries.push(`${studioClean} ${title}`);
+    if (studioClean && titleClean) queries.push(`${studioClean} ${titleClean}`);
 
     // Code fallback: If code available
     if (code)                 queries.push(`${code}`);
@@ -67,11 +79,11 @@ export function generateSearchQueries({ studio, title, date, code }) {
     // Secondary: Studio + dot-style date  (alternate uploader convention)
     if (studioClean && dot)  queries.push(`${studioClean} ${dot}`);
 
-    // Tertiary: Studio + Scene Title  (fallback for scenes without a date)
+    // Tertiary: Studio + Exact Scene Title  (fallback for scenes without a date)
     if (studioClean && title) queries.push(`${studioClean} ${title}`);
 
     // Final catch-all: just the title
-    if (title)               queries.push(title);
+    if (titleClean)          queries.push(titleClean);
 
     // De-duplicate while preserving order
     return [...new Set(queries)];

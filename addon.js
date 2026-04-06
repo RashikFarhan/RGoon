@@ -92,7 +92,7 @@ function sceneToMeta(scene) {
 // ─────────────────────────────────────────────────────────────
 
 addon.defineCatalogHandler(async ({ type, id, extra, config }) => {
-    if (type !== 'movie' || id !== 'stash_scenes') {
+    if (type !== 'movie' || (id !== 'stash_scenes' && id !== 'stash_search')) {
         return { metas: [] };
     }
 

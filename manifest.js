@@ -15,6 +15,7 @@ const core = {
     description: 'Bridge between StashDB and public torrent providers',
     resources:   ['catalog', 'meta', 'stream'],
     types:       ['movie'],
+    idPrefixes:  ['stash:'],
     catalogs: [
         {
             type:  'movie',
@@ -26,6 +27,14 @@ const core = {
                 // ── genre / developer: repurposed Studio & Tag filters ──
                 { name: 'genre',     isRequired: false },
                 { name: 'developer', isRequired: false },
+            ],
+        },
+        {
+            type:  'movie',
+            id:    'stash_search',
+            name:  'Stash Search',
+            extra: [
+                { name: 'search', isRequired: true }
             ],
         },
     ],
